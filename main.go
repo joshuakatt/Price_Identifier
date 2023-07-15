@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -10,6 +9,11 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+type AmazonItem struct {
+	Title string
+	Price string
+}
 
 func main() {
 	if len(os.Args) != 2 {
@@ -19,59 +23,52 @@ func main() {
 
 	url := os.Args[1]
 
-	// Adjust the priceKeywords and priceElements based on the specific webpage
-	priceKeywords := []string{"price", "cost"}
-	priceElements := []string{"span", "div", "p"}
+	item, err := GetAmazonItem(url)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
 
-	price := GetPrice(url, priceKeywords, priceElements)
-	if price != "" {
-		fmt.Println("Price found:", price)
+	if item.Price != "" {
+		fmt.Println("Price found:", item.Price)
 	} else {
 		fmt.Println("Price not found")
 	}
 }
 
-func GetPrice(url string, priceKeywords []string, priceElements []string) string {
-	// Send an HTTP GET request to the webpage
+func GetAmazonItem(url string) (*AmazonItem, error) {
 	response, err := http.Get(url)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	defer response.Body.Close()
 
-	// Parse the HTML document
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	// Find the main price/cost component in the webpage
-	price := findMainPrice(doc, priceKeywords, priceElements)
+	title := findTitle(doc)
+	price := findPrice(doc)
 
-	return price
+	return &AmazonItem{
+		Title: title,
+		Price: price,
+	}, nil
 }
 
-func findMainPrice(doc *goquery.Document, priceKeywords []string, priceElements []string) string {
-	// Iterate through each keyword and element to find the main price
-	for _, keyword := range priceKeywords {
-		for _, element := range priceElements {
-			price := findPriceWithKeyword(doc, keyword, element)
-			if price != "" {
-				return price
-			}
-		}
-	}
-
-	return ""
+func findTitle(doc *goquery.Document) string {
+	return doc.Find("#productTitle").Text()
 }
 
-func findPriceWithKeyword(doc *goquery.Document, keyword string, element string) string {
-	price := ""
+func findPrice(doc *goquery.Document) string {
+	priceRegex := regexp.MustCompile(`\$[\d.,]+`)
+	var price string
 
-	doc.Find(element).Each(func(i int, s *goquery.Selection) {
-		text := strings.ToLower(strings.TrimSpace(s.Text()))
-		if strings.Contains(text, keyword) {
-			price = extractPriceFromText(text)
+	doc.Find(".a-price, .a-offscreen").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if priceRegex.MatchString(text) {
+			price = strings.TrimPrefix(text, "$")
 			if price != "" {
 				return
 			}
@@ -79,19 +76,4 @@ func findPriceWithKeyword(doc *goquery.Document, keyword string, element string)
 	})
 
 	return price
-}
-
-func extractPriceFromText(text string) string {
-	// Regular expression to extract a price pattern
-	priceRegex := regexp.MustCompile(`\$\d+(\.\d+)?`)
-
-	// Find all occurrences of the price pattern in the text
-	matches := priceRegex.FindAllString(text, -1)
-
-	// Return the first matched price or an empty string if not found
-	if len(matches) > 0 {
-		return matches[0]
-	}
-
-	return ""
 }
